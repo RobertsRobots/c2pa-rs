@@ -635,6 +635,7 @@ name = "c2pa-c-ffi"
 version = "0.85.2"
 dependencies = [
  "c2pa",
+ "c2pa_cbor",
  "cbindgen",
  "libc",
  "serde",

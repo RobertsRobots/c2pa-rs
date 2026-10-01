@@ -1,3 +1,4 @@
+use c2pa_cbor::Value;
 use serde::{Deserialize, Serialize};
 
 use super::labels;
@@ -67,6 +68,53 @@ impl SoftBinding {
     /// See [`SoftBinding::pad`] for more information.
     pub fn pad2(&self) -> Option<&[u8]> {
         self.pad2.as_ref().map(|bytes| bytes.as_slice())
+    }
+}
+
+/// Re-encodes the byte-string fields of a soft binding map as CBOR byte strings.
+///
+/// The CDDL declares a soft binding block's `value` (and the map's `pad` and `pad2`)
+/// as `bstr`. JSON has no byte type, so an assertion supplied as JSON (a manifest
+/// definition, or [`Builder::add_assertion`] with a JSON value) arrives here as a CBOR
+/// array of integers. This converts any such array whose elements are all 0..=255 into
+/// `Value::Bytes` and leaves every other field untouched. Values that are already byte
+/// strings are unchanged, so typed callers see no difference.
+///
+/// Backport of contentauth/c2pa-rs#2757 (fixes #2689) to the 0.85.2 line.
+///
+/// [`Builder::add_assertion`]: crate::Builder::add_assertion
+pub(crate) fn soft_binding_bytes_to_bstr(value: &mut Value) {
+    fn array_to_bytes(v: &mut Value) {
+        if let Value::Array(items) = v {
+            let bytes: Option<Vec<u8>> = items
+                .iter()
+                .map(|i| match i {
+                    Value::Integer(n) => u8::try_from(*n).ok(),
+                    _ => None,
+                })
+                .collect();
+            if let Some(bytes) = bytes {
+                *v = Value::Bytes(bytes);
+            }
+        }
+    }
+
+    let Value::Map(map) = value else {
+        return;
+    };
+    for key in ["pad", "pad2"] {
+        if let Some(v) = map.get_mut(&Value::Text(key.to_owned())) {
+            array_to_bytes(v);
+        }
+    }
+    if let Some(Value::Array(blocks)) = map.get_mut(&Value::Text("blocks".to_owned())) {
+        for block in blocks {
+            if let Value::Map(block) = block {
+                if let Some(v) = block.get_mut(&Value::Text("value".to_owned())) {
+                    array_to_bytes(v);
+                }
+            }
+        }
     }
 }
 
